@@ -273,6 +273,8 @@
 
 <script>
 (function(){
+  const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyNvDuH8-BVjhjw-RpfUSJmq5BXiKRv7FrHzIx-24GF9qbuJjikbI3mtAhaf09P6Xim/exec';
+
   const toastEl = document.getElementById('toast');
   function toast(msg){
     toastEl.textContent = msg;
@@ -309,21 +311,14 @@
     cargarOficina();
   });
 
-  // ---------------- Perfil (nombre recordado en este dispositivo) ----------------
+  // ---------------- Perfil (nombre recordado en este celular) ----------------
   const nombreInput = document.getElementById('op-nombre');
-  (async function(){
-    try{
-      const r = await window.storage.get('perfil_operador', false);
-      if(r && r.value){
-        const p = JSON.parse(r.value);
-        if(p.nombre) nombreInput.value = p.nombre;
-      }
-    }catch(e){ /* sin perfil guardado aún */ }
-  })();
-  nombreInput.addEventListener('change', async ()=>{
-    try{
-      await window.storage.set('perfil_operador', JSON.stringify({nombre: nombreInput.value}), false);
-    }catch(e){}
+  try{
+    const saved = localStorage.getItem('perfil_operador_nombre');
+    if(saved) nombreInput.value = saved;
+  }catch(e){ /* navegador sin almacenamiento local, se ignora */ }
+  nombreInput.addEventListener('change', ()=>{
+    try{ localStorage.setItem('perfil_operador_nombre', nombreInput.value); }catch(e){}
   });
 
   // ---------------- Selección de ruta / estatus ----------------
@@ -343,7 +338,7 @@
     });
   });
 
-  // ---------------- Registrar avance ----------------
+  // ---------------- Registrar avance (envía a la Hoja de Google) ----------------
   const folioInput = document.getElementById('op-folio');
   const notaInput = document.getElementById('op-nota');
   const submitBtn = document.getElementById('op-submit');
@@ -360,10 +355,13 @@
     submitBtn.disabled = true;
     const now = new Date();
     const entry = { ruta: rutaSel, folio, estatus: estatusSel, nota, cuadrilla: nombre || 'Sin nombre', hora: now.toISOString() };
-    const key = `avance:${todayKey(now)}:${now.getTime()}-${Math.random().toString(36).slice(2,7)}`;
 
     try{
-      await window.storage.set(key, JSON.stringify(entry), true);
+      await fetch(SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(entry)
+      });
       toast(`Registrado a las ${horaLegible(entry.hora)}`);
       folioInput.value = '';
       notaInput.value = '';
@@ -377,24 +375,21 @@
     }
   });
 
-  async function listarDia(fecha){
-    const prefix = `avance:${fecha}:`;
-    let keys = [];
+  // ---------------- Traer todos los registros desde la Hoja de Google ----------------
+  async function obtenerTodos(){
     try{
-      const r = await window.storage.list(prefix, true);
-      keys = (r && r.keys) || [];
-    }catch(e){ keys = []; }
-    const items = [];
-    for(const k of keys){
-      try{
-        const r = await window.storage.get(k, true);
-        if(r && r.value){
-          const v = JSON.parse(r.value);
-          v._key = k;
-          items.push(v);
-        }
-      }catch(e){ /* clave inexistente, se ignora */ }
+      const resp = await fetch(SCRIPT_URL + '?t=' + Date.now());
+      if(!resp.ok) return [];
+      const data = await resp.json();
+      return Array.isArray(data) ? data : [];
+    }catch(e){
+      return [];
     }
+  }
+
+  async function listarDia(fecha){
+    const todos = await obtenerTodos();
+    const items = todos.filter(i => i.hora && todayKey(new Date(i.hora)) === fecha);
     items.sort((a,b)=> new Date(b.hora) - new Date(a.hora));
     return items;
   }
